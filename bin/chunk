@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+#
+# Copyright (C) 2016  Bjarte Johansen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -o errexit    # Exit on error
+set -o nounset    # Exit on unset variable
+set -o pipefail   # Exit on failing pipe
+
+function usage() {
+    NAME=$(basename "$0")
+    cat <<-EOF
+	${NAME}	uses a trained SVM model to find named entities in
+	Norwegian (bokmål) text.
+
+	Usage:
+  	  ${NAME} FILE
+  	  ${NAME} -h | --help
+
+	Options:
+	  -h --help     Show this screen.
+	EOF
+}
+
+while [[ "$#" -gt 0 ]]; do
+    case "${1}" in
+	-h|--help)
+	    usage
+	    exit 0
+	    ;;
+	* )
+	    FILE="$1"
+    esac
+    shift
+done
+
+# Get the source directory of the script.
+CURDIR=$(realpath "${0}")
+CURDIR=$(dirname "${CURDIR}")
+
+function obt_clean {
+    # Remove empty lines; move all data concerning one instance to the
+    # same line; add tab after the PoS; remove xml tags; remove <>
+    # around word; remove "" around lemma; add tab between word and
+    # lemma.
+    sed '/^\s*$/d'							\
+	| paste --delimiter '\t\0' - - -				\
+	| sed -e 's/\([^"]*\)$/\t\1/'					\
+              -e 's,<word>\(.*\)</word>,\1,'				\
+              -e 's/"<\(.*\)>"\t"\(.*\)"/\1\t\2/'
+}
+
+function text2vector {
+    "${CURDIR}/obt" "${1}"						\
+	| obt_clean							\
+	| "$CURDIR/add_sentence_nb"					\
+	| "${CURDIR}/vectorize"
+}
+
+function svm_format {
+    KEYS="${CURDIR}/../res/2015-11-19.svm.keys"
+    if [[ ! -f "${KEYS}" ]]; then
+	echo "Missing SVM key file: ${KEYS}" >&2
+	exit 127
+    fi
+    # Convert the data to the libsvm sparse vector format.
+    "${CURDIR}/csv2svm" --keys="${KEYS}"
+}
+
+function tag {
+   # Cut the temporary tags of the original vector; translate the
+   # number tags predicted by svm_predict into B I O; paste together
+   # the predicted tags and the original vector.
+    paste <(cut --complement --field=13 "${1}")				\
+	  <(tr "123" "BIO")
+}
+
+FIFODIR=$(mktemp -d chunk-XXXX)
+
+function cleanup {
+    # Remove the temporary file on exit.
+    rm -rf "${FIFODIR}"
+}
+
+# Set a trap to cleanup when exiting.
+trap cleanup EXIT INT TERM HUP
+
+VECTOR="${FIFODIR}/vector"
+SVM_INPUT="${FIFODIR}/svm_input"
+PREDICTS="${FIFODIR}/predicts"
+
+
+mkfifo "${VECTOR}" "${SVM_INPUT}" "${PREDICTS}"
+
+# Vectorize the input and copy the output to $VECTOR. Convert the
+# vectorized input to the SVM format and redirect into $SVM_INPUT
+text2vector "${FILE:-/dev/stdin}"					\
+    | tee "${VECTOR}"							\
+    | svm_format > "${SVM_INPUT}" &
+
+# Join the predicted tags from svm-predict that will be in $PREDICTS
+# with the copy of the vector in $VECTOR. This command is the output
+# of the script.
+tag "${VECTOR}" < "${PREDICTS}" &
+
+# svm-predict takes an input- , model- and output file. The output of
+# svm-predict are stats about the prediction; which is not interesting
+# in this case.
+MODEL="${CURDIR}/../res/2015-11-19.svm.model"
+if [[ ! -f "${MODEL}" ]]; then
+    echo "Missing SVM model file: ${MODEL}" >&2
+    exit 127
+fi
+svm-predict "${SVM_INPUT}" "${MODEL}" "${PREDICTS}" 1>/dev/null
+
+# Wait for the tag command to finish so we are sure to get all the
+# output as it is running in the background and will be stopped when
+# the script exits.
+wait %?tag

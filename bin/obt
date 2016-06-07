@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#
+# Copyright (C) 2016  Bjarte Johansen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -o errexit    # Exit on error
+set -o nounset    # Exit on unset variable
+set -o pipefail   # Exit on failing pipe
+
+function usage() {
+    NAME=$(basename "$0")
+    cat <<-EOF
+	Usage:
+  	  ${NAME} [-b|-n] [-s] FILE
+  	  ${NAME} -h | --help
+
+	Options:
+	  -h --help     Show this screen.
+	  -b --bokmål   Tag bokmål (The default).
+	  -n --nynorsk  Tag nynorsk, nynorsk has no statistical tagger.
+	  -s --nostat   Don't use the statistical tagger.
+	EOF
+}
+
+LANG="bm"
+NOSTAT=""
+while [[ "$#" -gt 0 ]]; do
+    case "${1}" in
+	-b|--bokmål)
+	    LANG="bm"
+	    ;;
+	-n|--nynorsk)
+	    LANG="nn"
+	    NOSTAT="-nostat"
+	    ;;
+	-s|--nostat)
+	    NOSTAT="-nostat"
+	    ;;
+	-h|--help)
+	    usage
+	    exit 0
+	    ;;
+	* )
+	    FILE="$1"
+    esac
+    shift
+done
+
+CURDIR=$(realpath "${0}")
+CURDIR=$(dirname "${CURDIR}")
+
+if [[ ! -f "${CURDIR}/mtag" ]]; then
+    echo "Missing command: ${CURDIR}/mtag" >&2
+    exit 127
+elif [[ ! -x "${CURDIR}/mtag" ]]; then
+    echo "File is not executable: ${CURDIR}/mtag" >&2
+    exit 127
+fi
+
+# OBT prints some messages to stderr that we are not interested in.
+LC_ALL="en_US.UTF-8"							\
+"${CURDIR}/tag${NOSTAT}-${LANG}.sh" "${FILE:-/dev/stdin}"

@@ -1,0 +1,6 @@
+[submodule "lib/OBT-Stat"]
+	path = lib/OBT-Stat
+	url = git@github.com:andrely/OBT-Stat.git
+[submodule "lib/OBT"]
+	path = lib/OBT
+	url = git@github.com:noklesta/The-Oslo-Bergen-Tagger.git

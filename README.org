@@ -1,0 +1,16 @@
+* README
+
+  =egennavn= er et program for å finne egennavn i tekst.
+
+  - Forkrav til programvare
+    - GNU coreutils
+    - GNU awk
+    - GNU sed
+    - bash
+    - ruby
+    - R
+      - docopt.R
+      - data.table
+      - stringr
+    - vislcg3
+    - libsvm

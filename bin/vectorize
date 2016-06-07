@@ -1,0 +1,99 @@
+#!/usr/bin/env Rscript
+#
+# Copyright (C) 2016  Bjarte Johansen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+doc <- "
+Usage:
+  vectorize.R [-h] [-c CATEGORIES] [-o OUTPUT] [FILE]
+
+  Options:
+    -h --help                   Show help message
+    -c FILE --categories=FILE   Add categories to output
+    -o FILE --output=FILE       Output csv file
+"
+
+library(docopt, quietly = TRUE)
+library(data.table, quietly = TRUE)
+library(stringr)
+
+opts <- docopt(doc)
+
+
+input <- opts$FILE
+if (is.null(input)) {
+    input <-  "file:///dev/stdin"
+
+}
+
+
+output <- opts$`--output`
+if (is.null(output)) {
+    output <- stdout()
+}
+
+dat <- fread(
+    input,
+    quote = "",
+    header = FALSE,
+    sep = "\t"
+)
+
+cat.file <- opts$`--categories`
+if(!is.null(cat.file) && file.exists(cat.file)) {
+    categories <- fread(
+        cat.file,
+        sep = "\t",
+        quote = "",
+        header = FALSE
+    )[, 2, with = FALSE]
+} else {
+    categories <- rep("x", nrow(dat))
+}
+
+dat[
+  , `:=`(last.4 = dat[, ifelse(nchar(V3) >= 4, str_sub(V3, -4, -1), V3)],
+         PoS = word(str_trim(V5, side = "left")),
+         S = V1 <= shift(V1, type="lead"),
+         lemma = str_replace_all(str_trim(V4), "\\s", "_"))
+]
+dat[
+  , `:=`(`-2` = ifelse(shift(S) & shift(S, 2), shift(lemma, 2), NA),
+         `-1` = ifelse(shift(S), shift(lemma), NA),
+         `+1` = ifelse(S, shift(lemma, type="lead"), NA),
+         `+2` = ifelse(S & shift(S, type="lead"), shift(lemma, 2, type="lead"), NA),
+         `-2PoS` = ifelse(shift(S) & shift(S, 2), shift(PoS, 2), NA),
+         `-1PoS` = ifelse(shift(S), shift(PoS), NA),
+         `+1PoS` = ifelse(S, shift(PoS, type="lead"), NA),
+         `+2PoS` = ifelse(S & shift(S, type="lead"), shift(PoS, 2, type="lead"), NA),
+         Cap = ifelse(grepl("^[[:upper:]]+$", V2), "all.cap",
+               ifelse(grepl("^[[:upper:]]", V2), "cap", NA)),
+         Cat = categories)
+]
+dat <- dat[
+  , .(`-2`, `-1`, `+1`, `+2`,
+      `-2PoS`, `-1PoS`, `+1PoS`, `+2PoS`,
+      Cap, last.4, lemma, PoS, Cat)
+][, lapply(.SD, tolower)]
+
+write.table(
+    dat,
+    file = output,
+    quote = FALSE,
+    row.names = FALSE,
+    col.names = FALSE,
+    sep = "\t",
+    fileEncoding = "utf-8"
+)
