@@ -19,8 +19,8 @@ set -o errexit    # Exit on error
 set -o nounset    # Exit on unset variable
 set -o pipefail   # Exit on failing pipe
 
+NAME=$(basename "$0")
 function usage() {
-    NAME=$(basename "$0")
     cat <<-EOF
 	${NAME}	uses a trained SVM model to find named entities in
 	Norwegian (bokmål) text.
@@ -50,44 +50,7 @@ done
 CURDIR=$(realpath "${0}")
 CURDIR=$(dirname "${CURDIR}")
 
-function obt_clean {
-    # Remove empty lines; move all data concerning one instance to the
-    # same line; add tab after the PoS; remove xml tags; remove <>
-    # around word; remove "" around lemma; add tab between word and
-    # lemma.
-    sed '/^\s*$/d'							\
-	| paste --delimiter '\t\0' - - -				\
-	| sed -e 's/\([^"]*\)$/\t\1/'					\
-              -e 's,<word>\(.*\)</word>,\1,'				\
-              -e 's/"<\(.*\)>"\t"\(.*\)"/\1\t\2/'
-}
-
-function text2vector {
-    "${CURDIR}/obt" "${1}"						\
-	| obt_clean							\
-	| "$CURDIR/add_sentence_nb"					\
-	| "${CURDIR}/vectorize"
-}
-
-function svm_format {
-    KEYS="${CURDIR}/../res/2015-11-19.svm.keys"
-    if [[ ! -f "${KEYS}" ]]; then
-	echo "Missing SVM key file: ${KEYS}" >&2
-	exit 127
-    fi
-    # Convert the data to the libsvm sparse vector format.
-    "${CURDIR}/csv2svm" --keys="${KEYS}"
-}
-
-function tag {
-   # Cut the temporary tags of the original vector; translate the
-   # number tags predicted by svm_predict into B I O; paste together
-   # the predicted tags and the original vector.
-    paste <(cut --complement --field=13 "${1}")				\
-	  <(tr "123" "BIO")
-}
-
-FIFODIR=$(mktemp -d chunk-XXXX)
+FIFODIR=$(mktemp -d "${NAME}-XXXX")
 
 function cleanup {
     # Remove the temporary file on exit.
@@ -97,23 +60,23 @@ function cleanup {
 # Set a trap to cleanup when exiting.
 trap cleanup EXIT INT TERM HUP
 
+OBT_OUTPUT="${FIFODIR}/obt_output"
 VECTOR="${FIFODIR}/vector"
-SVM_INPUT="${FIFODIR}/svm_input"
 PREDICTS="${FIFODIR}/predicts"
 
 
-mkfifo "${VECTOR}" "${SVM_INPUT}" "${PREDICTS}"
+mkfifo "${OBT_OUTPUT}" "${VECTOR}" "${PREDICTS}"
 
-# Vectorize the input and copy the output to $VECTOR. Convert the
-# vectorized input to the SVM format and redirect into $SVM_INPUT
-text2vector "${FILE:-/dev/stdin}"					\
-    | tee "${VECTOR}"							\
-    | svm_format > "${SVM_INPUT}" &
+"${CURDIR}/obt" "${FILE:-/dev/stdin}"					\
+    | tee "${OBT_OUTPUT}"						\
+    | "${CURDIR}/vectorize"  > "${VECTOR}"  &
 
 # Join the predicted tags from svm-predict that will be in $PREDICTS
 # with the copy of the vector in $VECTOR. This command is the output
 # of the script.
-tag "${VECTOR}" < "${PREDICTS}" &
+grep "^<w" "${OBT_OUTPUT}"						\
+    | sed 's\</*word>\\g'						\
+    | paste - <(cat "${PREDICTS}" | tr "123" "BIO" ) &
 
 # svm-predict takes an input- , model- and output file. The output of
 # svm-predict are stats about the prediction; which is not interesting
@@ -123,9 +86,6 @@ if [[ ! -f "${MODEL}" ]]; then
     echo "Missing SVM model file: ${MODEL}" >&2
     exit 127
 fi
-svm-predict "${SVM_INPUT}" "${MODEL}" "${PREDICTS}" 1>/dev/null
+svm-predict "${VECTOR}" "${MODEL}" "${PREDICTS}" 1>/dev/null
 
-# Wait for the tag command to finish so we are sure to get all the
-# output as it is running in the background and will be stopped when
-# the script exits.
-wait %?tag
+wait

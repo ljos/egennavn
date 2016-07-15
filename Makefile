@@ -6,10 +6,13 @@
 # governed by the terms of the GPLv3 License.
 
 APP_NAME = egennavn
-VERSION  = 0.0.1
+VERSION  = 1.0.0
 OS := $(shell uname)
+GRAMMARS = res/bm_morf-prestat.cg res/bm_morf.cg
+EXES = bin/mtag bin/keys_map.py
 
-all: bin/mtag res/bm_morf-prestat.cg
+
+all: $(EXES) $(GRAMMARS)
 
 bin/mtag:
 ifeq ($(OS), Darwin)
@@ -20,13 +23,18 @@ else
 	chmod +x $@
 endif
 
-res/bm_morf-prestat.cg: lib
+bin/keys_map.py:
+	python3 -B res/make_key_file.py > "$@"
+
+res/%.cg: lib/OBT/cg/%.cg | lib
 	iconv --from-code=latin1					\
 	      --to-code=utf-8						\
-	      lib/OBT/cg/bm_morf-prestat.cg > $@
+          "$<" > "$@"
 
 lib:
 	git submodule update --init --recursive
 
+clean:
+	-rm -f res/*.cg
 
-.PHONY: all lib
+.PHONY: all lib clean

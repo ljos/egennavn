@@ -1,2 +1,6 @@
 bin/mtag
 /.Rhistory
+/*.pyc
+__pycache__
+/bin/keys_map.py
+/res/bm_morf.cg

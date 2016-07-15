@@ -1,6 +1,7 @@
-#!/usr/bin/env Rscript
+#!/usr/bin/env python3
 #
 # Copyright (C) 2016  Bjarte Johansen
+# Copyright (C) 2016  Truls Pedersen
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,86 +15,145 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+"""
+vectorize
 
-doc <- "
 Usage:
-  vectorize.R [-h] [-c CATEGORIES] [-o OUTPUT] [FILE]
+  vectorize [ FILE ]
+"""
 
-  Options:
-    -h --help                   Show help message
-    -c FILE --categories=FILE   Add categories to output
-    -o FILE --output=FILE       Output csv file
-"
-
-library(docopt, quietly = TRUE)
-library(data.table, quietly = TRUE)
-library(stringr)
-
-opts <- docopt(doc)
+import sys
+from docopt import docopt
+from funcparserlib.lexer import make_tokenizer
+from funcparserlib.parser import oneplus, many, some
+from keys_map import *
 
 
-input <- opts$FILE
-if (is.null(input)) {
-    input <-  "file:///dev/stdin"
+def binarize(sentence):
+    pad = [(None, None, None, [None])] * 2
+    sentence = pad + sentence + pad
+    for i in range(2, len(sentence) - 2):
+        codes = []
 
-}
+        # lemma - 2
+        entry = sentence[i - 2]
+        val = keys_column_1.get(entry[2], None)
+        codes.append(val)
 
 
-output <- opts$`--output`
-if (is.null(output)) {
-    output <- stdout()
-}
+        # lemma - 1
+        entry = sentence[i - 1]
+        val = keys_column_2.get(entry[2], None)
+        codes.append(val)
 
-dat <- fread(
-    input,
-    quote = "",
-    header = FALSE,
-    sep = "\t"
-)
+        # lemma + 1
+        entry = sentence[i + 1]
+        val = keys_column_3.get(entry[2], None)
+        codes.append(val)
 
-cat.file <- opts$`--categories`
-if(!is.null(cat.file) && file.exists(cat.file)) {
-    categories <- fread(
-        cat.file,
-        sep = "\t",
-        quote = "",
-        header = FALSE
-    )[, 2, with = FALSE]
-} else {
-    categories <- rep("x", nrow(dat))
-}
+        # lemma + 2
+        entry = sentence[i + 2]
+        val = keys_column_4.get(entry[2], None)
+        codes.append(val)
 
-dat[
-  , `:=`(last.4 = dat[, ifelse(nchar(V3) >= 4, str_sub(V3, -4, -1), V3)],
-         PoS = word(str_trim(V5, side = "left")),
-         S = V1 <= shift(V1, type="lead"),
-         lemma = str_replace_all(str_trim(V4), "\\s", "_"))
-]
-dat[
-  , `:=`(`-2` = ifelse(shift(S) & shift(S, 2), shift(lemma, 2), NA),
-         `-1` = ifelse(shift(S), shift(lemma), NA),
-         `+1` = ifelse(S, shift(lemma, type="lead"), NA),
-         `+2` = ifelse(S & shift(S, type="lead"), shift(lemma, 2, type="lead"), NA),
-         `-2PoS` = ifelse(shift(S) & shift(S, 2), shift(PoS, 2), NA),
-         `-1PoS` = ifelse(shift(S), shift(PoS), NA),
-         `+1PoS` = ifelse(S, shift(PoS, type="lead"), NA),
-         `+2PoS` = ifelse(S & shift(S, type="lead"), shift(PoS, 2, type="lead"), NA),
-         Cap = ifelse(grepl("^[[:upper:]]+$", V2), "all.cap",
-               ifelse(grepl("^[[:upper:]]", V2), "cap", NA)),
-         Cat = categories)
-]
-dat <- dat[
-  , .(`-2`, `-1`, `+1`, `+2`,
-      `-2PoS`, `-1PoS`, `+1PoS`, `+2PoS`,
-      Cap, last.4, lemma, PoS, Cat)
-][, lapply(.SD, tolower)]
+        # part of speech - 2
+        entry = sentence[i - 2]
+        val = keys_column_5.get(entry[3][0], None)
+        codes.append(val)
 
-write.table(
-    dat,
-    file = output,
-    quote = FALSE,
-    row.names = FALSE,
-    col.names = FALSE,
-    sep = "\t",
-    fileEncoding = "utf-8"
-)
+        # part of speech - 1
+        entry = sentence[i - 1]
+        val = keys_column_6.get(entry[3][0], None)
+        codes.append(val)
+
+        # part of speech + 1
+        entry = sentence[i + 1]
+        val = keys_column_7.get(entry[3][0], None)
+        codes.append(val)
+
+        # part of speech + 2
+        entry = sentence[i + 2]
+        val = keys_column_8.get(entry[3][0], None)
+        codes.append(val)
+
+        # caps
+        entry = sentence[i]
+        if entry[0].isupper():
+            codes.append(keys_column_9["all.cap"])
+        elif entry[0][0].isupper():
+            codes.append(keys_column_9["cap"])
+
+        # last 4 characters
+        last4 = entry[0][-4:].lower()
+        val = keys_column_10.get(last4, None)
+        codes.append(val)
+
+        # lemma
+        lemma = entry[2]
+        val = keys_column_11.get(lemma, None)
+        codes.append(val)
+
+        # part of speech
+        val = keys_column_12.get(entry[3][0], None)
+        codes.append(val)
+
+        print("1", " ".join([str(x)+":1" for x in codes if x is not None]))
+
+def parse(string):
+    def tokenize(string):
+        specs = [
+            ('Word', (r'<word>.+</word>',)),
+            ('Cohort', (r'"<.+>"',)),
+            ('Reading', (r'".+"',)),
+            ('Space', (r'\s+',)),
+            ('NL', (r'[\r\n]+',)),
+            ('PoS', (r'\S+',))
+        ]
+        useless = ['NL', 'Space']
+        t = make_tokenizer(specs)
+        return [x for x in t(string) if x.type not in useless]
+
+    tokens = tokenize(string)
+
+    def tokval(x):
+        return x.value
+
+    def toktype(t):
+        return some(lambda x: x.type == t) >> tokval
+
+    def make_word(val):
+        word, (cohort, (lemma, pos)) = val
+        return (word[6:-7], cohort[2:-2], lemma[1:-1], pos)
+
+    pos = toktype('PoS')
+    reading = toktype('Reading') + many(pos)
+    cohort = toktype('Cohort') + reading
+    word = toktype('Word') + cohort >> make_word
+    parser = many(word)
+
+    return parser.parse(tokens)
+
+def sentences(doc):
+    sentence = []
+    for word in doc:
+        sentence.append(word)
+        pos = word[-1]
+        if '<<<' in pos:
+            yield sentence
+            sentence = []
+
+def main():
+    args = docopt(__doc__, version='0.1.0')
+
+    with open(args['FILE']) if args['FILE'] else sys.stdin as f:
+        text = f.read()
+
+    document = parse(text)
+
+    for sentence in sentences(document):
+        binarize(sentence)
+
+
+if __name__ == "__main__":
+    main()
