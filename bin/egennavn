@@ -15,8 +15,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+set -o errexit    # Exit on error
+set -o nounset    # Exit on unset variable
+set -o pipefail   # Exit on failing pipe
+
+NAME=$(basename "$0")
 function usage() {
-    NAME=$(basename "$0")
     cat <<-EOF
 	${NAME}	uses a trained SVM model to find named entities in
 	Norwegian (bokmål) text.
@@ -42,8 +46,46 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# Get the source directory of the script.
 CURDIR=$(realpath "${0}")
 CURDIR=$(dirname "${CURDIR}")
 
-"${CURDIR}/chunk" "${FILE:-/dev/stdin}" \
-    | "${CURDIR}/entities"
+FIFODIR=$(mktemp -d "${NAME}-XXXX")
+
+function cleanup {
+    # Remove the temporary file on exit.
+    rm -rf "${FIFODIR}"
+}
+
+# Set a trap to cleanup when exiting.
+trap cleanup EXIT INT TERM HUP
+
+OBT_OUTPUT="${FIFODIR}/obt_output"
+VECTOR="${FIFODIR}/vector"
+PREDICTS="${FIFODIR}/predicts"
+
+
+mkfifo "${OBT_OUTPUT}" "${VECTOR}" "${PREDICTS}"
+
+"${CURDIR}/obt" "${FILE:-/dev/stdin}"					\
+    | tee "${OBT_OUTPUT}"						\
+    | "${CURDIR}/vectorize"  > "${VECTOR}"  &
+
+# Join the predicted tags from svm-predict that will be in $PREDICTS
+# with the copy of the vector in $VECTOR. This command is the output
+# of the script.
+grep "^<w" "${OBT_OUTPUT}"						\
+    | sed 's\</*word>\\g'						\
+    | paste - <(cat "${PREDICTS}" | tr "123" "BIO" ) &
+
+# svm-predict takes an input- , model- and output file. The output of
+# svm-predict are stats about the prediction; which is not interesting
+# in this case.
+MODEL="${CURDIR}/../res/2015-11-19.svm.model"
+if [[ ! -f "${MODEL}" ]]; then
+    echo "Missing SVM model file: ${MODEL}" >&2
+    exit 127
+fi
+svm-predict "${VECTOR}" "${MODEL}" "${PREDICTS}" 1>/dev/null
+
+wait
