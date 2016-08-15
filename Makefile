@@ -1,4 +1,4 @@
-# Build script for mtag
+# Build script for egennavn
 #
 # Copyright (C) 2015 Bjarte Johansen
 #
