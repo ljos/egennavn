@@ -11,3 +11,14 @@
     - python3
     - ruby
     - vislcg3
+
+** Reference
+
+#+BEGIN_EXAMPLE
+@article{johansen2015named,
+  title={Named-Entity Chunking for Norwegian Text using Support Vector Machines},
+  author={Johansen, Bjarte},
+  journal={Norsk Informatikkonferanse (NIK)},
+  year={2015}
+}  
+#+END_EXAMPLE
