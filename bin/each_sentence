@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#
+# Copyright (C) 2016  Bjarte Johansen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -o errexit    # Exit on error
+set -o nounset    # Exit on unset variable
+set -o pipefail   # Exit on failing pipe
+
+NAME=$(basename "$0")
+function usage() {
+    cat <<-EOF
+	${NAME}	uses a trained SVM model to find named entities in
+	Norwegian (bokmål) text.
+
+	Usage:
+  	  ${NAME} FILE
+  	  ${NAME} -h | --help
+
+	Options:
+	  -h --help     Show this screen.
+	EOF
+}
+
+while [[ "$#" -gt 0 ]]; do
+    case "${1}" in
+	-h|--help)
+	    usage
+	    exit 0
+	    ;;
+	* )
+	    FILES="$@";
+	    break;
+    esac
+    shift
+done
+
+# Get the source directory of the script.
+CURDIR=$(realpath "${0}")
+CURDIR=$(dirname "${CURDIR}")
+
+FIFODIR=$(mktemp -d)
+
+function cleanup {
+    # Remove the temporary file on exit.
+    rm -rf "${FIFODIR}"
+
+    # Kill any async processes running.
+    for x in $(jobs -p); do
+	kill -TERM $x 2>/dev/null
+    done
+}
+
+# Set a trap to cleanup when exiting.
+trap cleanup EXIT INT TERM HUP
+
+OBT_OUT="${FIFODIR}/obt_out"
+VECTOR="${FIFODIR}/vector"
+PREDICTS="${FIFODIR}/predicts"
+CLEAN="${FIFODIR}/clean"
+
+
+mkfifo "${OBT_OUT}" "${VECTOR}" "${PREDICTS}" "${CLEAN}"
+
+# svm-predict takes an input- , model- and output file. The output of
+# svm-predict are stats about the prediction; which is not interesting
+# in this case.
+MODEL="${CURDIR}/../res/2015-11-19.svm.model"
+if [[ ! -f "${MODEL}" ]]; then
+    echo "Missing SVM model file: ${MODEL}" >&2
+    exit 127
+fi
+
+# cat needs to be here; it forces the read from the fifo.
+cat "${OBT_OUT}"				\
+    | sed '/^"<.*>"$/d'				\
+    | sed '/^<word>/d'				\
+    | paste "${PREDICTS}" -			\
+    | sed -e '/clb.*<<</c\\n'			\
+	  -e 's/\t"\(.*\)" .*$/\1/'		\
+	  -e 's/./\L\0/g'			\
+    | cat -s					\
+    | "${CURDIR}/with_entities"			\
+    | sed 's/^\s*//' &
+
+svm-predict "${VECTOR}" "${MODEL}" "${PREDICTS}" 1>/dev/null &
+
+cat ${FILES:-/dev/stdin}			\
+    | "${CURDIR}/obt"				\
+    | tee "${OBT_OUT}"				\
+    | "${CURDIR}/vectorize" > "${VECTOR}" &
+
+wait

@@ -1,0 +1,40 @@
+#!/usr/bin/gawk -f
+BEGIN {
+    # Set the field seperator to a single space.
+    FS="\t"
+
+    # In case the first token in a document is an entity we need to
+    # tell the awk that the "previous" token was really outside an
+    # entity.
+    prev = "O"
+}
+
+# The data are arranged in lines where the first element is the token
+# in the entity and the second element is the category it belongs to.
+
+# If the second element has the "inside a entity category."
+$2 ~ /I/ {
+    # But only if the previous category is "outside a entity."
+    if (prev != "O") {
+	# Print the token.
+	printf " %s", $1
+    }
+
+    # And ignore the rest of the script and go to the next line.
+    next
+}
+
+# For every other category.
+{
+    # Print a newline of it is not outside an entity.
+    if (prev != "O") {
+        printf "\n"
+    }
+    prev = $2
+}
+
+# If the category is also the beginning of an entity.
+$2 ~ /B/ {
+    # Print the token.
+    printf $1
+}

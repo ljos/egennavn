@@ -23,6 +23,7 @@ Usage:
   make_key_file [ FILE ]
 """
 import json
+import sys
 from docopt import docopt
 
 def main():

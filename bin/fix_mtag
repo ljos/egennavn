@@ -1,0 +1,9 @@
+#!/usr/bin/env expect
+
+
+
+set curdir [file dirname [file normalize [info script]]]
+
+spawn "$curdir/mtag" < [lindex $argv 0]
+
+interact

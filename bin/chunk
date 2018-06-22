@@ -50,7 +50,7 @@ done
 CURDIR=$(realpath "${0}")
 CURDIR=$(dirname "${CURDIR}")
 
-FIFODIR=$(mktemp -d "${NAME}-XXXX")
+FIFODIR=$(mktemp -d)
 
 function cleanup {
     # Remove the temporary file on exit.
@@ -69,7 +69,7 @@ mkfifo "${OBT_OUTPUT}" "${VECTOR}" "${PREDICTS}"
 
 "${CURDIR}/obt" "${FILE:-/dev/stdin}"					\
     | tee "${OBT_OUTPUT}"						\
-    | "${CURDIR}/vectorize"  > "${VECTOR}"  &
+    | "${CURDIR}/vectorize" > "${VECTOR}"  &
 
 # Join the predicted tags from svm-predict that will be in $PREDICTS
 # with the copy of the vector in $VECTOR. This command is the output

@@ -43,7 +43,6 @@ while [[ "$#" -gt 0 ]]; do
 	    ;;
 	-n|--nynorsk)
 	    LANG="nn"
-	    NOSTAT="-nostat"
 	    ;;
 	-s|--nostat)
 	    NOSTAT="-nostat"
@@ -61,14 +60,14 @@ done
 CURDIR=$(realpath "${0}")
 CURDIR=$(dirname "${CURDIR}")
 
-if [[ ! -f "${CURDIR}/mtag" ]]; then
-    echo "Missing command: ${CURDIR}/mtag" >&2
-    exit 127
-elif [[ ! -x "${CURDIR}/mtag" ]]; then
-    echo "File is not executable: ${CURDIR}/mtag" >&2
-    exit 127
+set +e
+LC_ALL="en_US.UTF-8"							\
+timeout 259200 "${CURDIR}/tag${NOSTAT}-${LANG}.sh" "${FILE:-/dev/stdin}"
+RETVAL="$?"
+set -e
+
+if [[ "${RETVAL}" -eq 124 ]]; then
+    echo "mtag timeout after 1h; input failed" >&2
 fi
 
-# OBT prints some messages to stderr that we are not interested in.
-LC_ALL="en_US.UTF-8"							\
-"${CURDIR}/tag${NOSTAT}-${LANG}.sh" "${FILE:-/dev/stdin}"
+exit "${RETVAL}"
